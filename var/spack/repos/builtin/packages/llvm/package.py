@@ -98,6 +98,7 @@ class Llvm(CMakePackage):
     llvm_url = base_url % {'pkg': 'llvm'}
     # Flang uses its own fork of llvm.
     flang_llvm_url = 'https://github.com/flang-compiler/llvm.git'
+    kitsune_url = 'https://github.com/lanl/kitsune.git'
 
     resources = {
         'compiler-rt': {
@@ -521,36 +522,45 @@ class Llvm(CMakePackage):
         }
     ]
 
+    kitsune_releases = [
+        {
+            'version': 'develop',
+            'branch': 'release/8.x',
+            'numeric-equiv': '8'
+        }
+    ]
+
+
     for release in releases:
         if release['version'] == 'develop':
             version(release['version'], svn=release['repo'])
 
-            for name, repo in release['resources'].items():
-                resource(name=name,
+            for rname, repo in release['resources'].items():
+                resource(name=rname,
                          svn=repo,
-                         destination=resources[name]['destination'],
+                         destination=resources[rname]['destination'],
                          when='@%s%s' % (release['version'],
-                                         resources[name].get('variant', "")),
-                         placement=resources[name].get('placement', None))
+                                         resources[rname].get('variant', "")),
+                         placement=resources[rname].get('placement', None))
         else:
             version(release['version'], release['md5'], url=llvm_url % release)
 
-            for name, md5 in release['resources'].items():
-                resource(name=name,
-                         url=resources[name]['url'] % release,
+            for rname, md5 in release['resources'].items():
+                resource(name=rname,
+                         url=resources[rname]['url'] % release,
                          md5=md5,
-                         destination=resources[name]['destination'],
+                         destination=resources[rname]['destination'],
                          when='@%s%s' % (release['version'],
-                                         resources[name].get('variant', "")),
-                         placement=resources[name].get('placement', None))
+                                         resources[rname].get('variant', "")),
+                         placement=resources[rname].get('placement', None))
 
     for release in flang_releases:
         if release['version'] == 'develop':
             version('flang-' + release['version'], git=flang_llvm_url, branch=release['branch'])
 
-            for name, branch in release['resources'].items():
-                flang_resource = flang_resources[name]
-                resource(name=name,
+            for rname, branch in release['resources'].items():
+                flang_resource = flang_resources[rname]
+                resource(name=rname,
                          git=flang_resource['git'],
                          branch=branch,
                          destination=flang_resource['destination'],
@@ -560,20 +570,26 @@ class Llvm(CMakePackage):
         else:
             version('flang-' + release['version'], git=flang_llvm_url, commit=release['commit'])
 
-            for name, commit in release['resources'].items():
-                flang_resource = flang_resources[name]
-                resource(name=name,
+            for rname, commit in release['resources'].items():
+                flang_resource = flang_resources[rname]
+                resource(name=rname,
                          git=flang_resource['git'],
                          commit=commit,
                          destination=flang_resource['destination'],
                          placement=flang_resource['placement'],
                          when='@flang-' + release['version'])
 
+
+    for release in kitsune_releases:
+        version(release['numeric-equiv'] + '-kitsune-' + release['version'],
+                git=kitsune_url, branch=release['branch'])
+
+
     conflicts('+clang_extra', when='~clang')
     conflicts('+lldb',        when='~clang')
 
     # LLVM 4 and 5 does not build with GCC 8
-    conflicts('%gcc@8:',       when='@:5')
+    conflicts('%gcc@8:',       when='@0:5')
     conflicts('%gcc@:5.0.999', when='@8:')
 
     # Github issue #4986
@@ -605,6 +621,24 @@ class Llvm(CMakePackage):
         if '+clang' in self.spec:
             run_env.set('CC', join_path(self.spec.prefix.bin, 'clang'))
             run_env.set('CXX', join_path(self.spec.prefix.bin, 'clang++'))
+
+    # With the new LLVM monorepo, CMakeLists.txt lives in the llvm subdirectory.
+    # Any versions based on this should appropriately modify this method
+    @property
+    def root_cmakelists_dir(self):
+        """The relative path to the directory containing CMakeLists.txt
+
+        This path is relative to the root of the extracted tarball,
+        not to the ``build_directory``. Defaults to the current directory.
+
+        :return: directory containing CMakeLists.txt
+        """
+        if '@8-kitsune' in self.spec:
+            return 'llvm'
+        else:
+            # default
+            return self.stage.source_path
+
 
     def cmake_args(self):
         spec = self.spec
